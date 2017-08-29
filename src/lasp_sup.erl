@@ -176,6 +176,12 @@ init(_Args) ->
                               DivergenceSpecs
                              ]),
 
+    %% Start pb supervisor
+    PbPort = list_to_integer(os:getenv("PB_PORT", "8087")),
+    application:set_env(lasp, pb_port, PbPort),
+    lasp_pb_sup:start_link(),
+    lager:info("Started TCP protobuffer server on port ~p",[PbPort]),
+
     {ok, {{one_for_one, 5, 10}, Children}}.
 
 %%%===================================================================
