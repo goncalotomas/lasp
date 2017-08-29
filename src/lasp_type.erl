@@ -36,24 +36,18 @@
          get_type/1,
          delta/3]).
 
-types() ->
-    [
-        {awset, {state_awset, undefined}},
-        {awset_ps, {state_awset_ps, undefined}},
-        {boolean, {state_boolean, undefined}},
-        {gcounter, {state_gcounter, undefined}},
-        {gmap, {state_gmap, undefined}},
-        {gset, {state_gset, undefined}},
-        {ivar, {state_ivar, undefined}},
-        {lwwregister, {state_lwwregister, undefined}},
-        {orset, {state_orset, undefined}},
-        {pair, {state_pair, undefined}},
-        {pncounter, {state_pncounter, undefined}},
-        {twopset, {state_twopset, undefined}}
-    ].
-
-get_mode() ->
-    lasp_config:get(mode, state_based).
+-define(TYPES, dict:from_list([{awset, state_awset},
+                               {awset_ps, state_awset_ps},
+                               {boolean, state_boolean},
+                               {gcounter, state_gcounter},
+                               {gmap, state_gmap},
+                               {gset, state_gset},
+                               {ivar, state_ivar},
+                               {lwwregister, state_lwwregister},
+                               {orset, state_orset},
+                               {pair, state_pair},
+                               {pncounter, state_pncounter},
+                               {twopset, state_twopset}])).
 
 %% @doc Return the internal type.
 get_type([]) ->
@@ -63,22 +57,7 @@ get_type([H | T]) ->
 get_type({T1, T2}) ->
     {get_type(T1), get_type(T2)};
 get_type(T) ->
-    get_type(T, get_mode()).
-
-get_type(T, Mode) ->
-    case orddict:find(T, types()) of
-        {ok, {StateType, PureOpType}} ->
-            case Mode of
-                delta_based ->
-                    StateType;
-                state_based ->
-                    StateType;
-                pure_op_based ->
-                    PureOpType
-            end;
-        error ->
-            T
-    end.
+    dict:fetch(T, ?TYPES).
 
 remove_args({T, _Args}) ->
     T;
@@ -128,16 +107,15 @@ new(Type) ->
 
 %% @doc Use the proper type for performing an update.
 update(Type, Operation, Actor, Value) ->
-    Mode = get_mode(),
-    T = get_type(remove_args(Type), Mode),
+    T = get_type(remove_args(Type)),
     RealActor = get_actor(T, Actor),
-    case Mode of
+    RealOperation = get_op(Operation),
+
+    case lasp_config:get(mode, state_based) of
         delta_based ->
-            T:delta_mutate(Operation, RealActor, Value);
+            T:delta_mutate(RealOperation, RealActor, Value);
         state_based ->
-            T:mutate(Operation, RealActor, Value);
-        pure_op_based ->
-            ok %% @todo
+            T:mutate(RealOperation, RealActor, Value)
     end.
 
 %% @private
@@ -147,6 +125,24 @@ get_actor(_Type, {_Id, Actor}) ->
     Actor;
 get_actor(_Type, Actor) ->
     Actor.
+
+%% @private
+get_op({apply, Key, Type, Op}) ->
+    {apply, Key, get_type(Type), get_op(Op)};
+get_op({apply_all, Ops}) ->
+    {apply_all, lists:map(
+        fun(Op) ->
+            case Op of
+                {Key, Type, Op} ->
+                    {Key, get_type(Type), get_op(Op)};
+                {Key, Op} ->
+                    {Key, get_op(Op)}
+            end
+        end,
+        Ops
+    )};
+get_op(Op) ->
+    Op.
 
 %% @doc Call the correct merge function for a given type.
 merge(Type, Value0, Value) ->
